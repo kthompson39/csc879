@@ -1,6 +1,6 @@
 from __future__ import print_function
 import sys
-print(sys.executable)
+#print(sys.executable)
 
 import numpy as np                 # to use numpy arrays
 import tensorflow as tf            # to specify and run computation graphs
@@ -9,72 +9,87 @@ import matplotlib.pyplot as plt    # to visualize data and draw plots
 from tqdm import tqdm              # to track progress of loops
 import datetime
 
-from model import Model1
-from model import Model2
+import model 
 
 import util
 
 def main():
     # grab data
-    train_ds, val_ds, test_ds = util.load_data()
+    original_train_ds, val_ds, test_ds = util.load_data()
 
-    vectorize_layer = util.create_vectorize_layer(train_ds)
-    embedding_layer = util.create_embedding_layer(vectorize_layer)
-    
     # grab model
-    model = Model1(vectorize_layer, embedding_layer)
-    model2 = Model2(vectorize_layer, embedding_layer)
-    
+    gen = model.Generator()
+    disc = model.Discriminator()
 
     early_stop = util.EarlyStopping(5)
     
     train_losses = []
     val_losses = []
     accuracy_values = []
-    # train model2 completely
+    # train model completely
     for epoch in range(100):
-        train_loss = train_model(train_ds, model2)
-        validation_loss = validate_model(val_ds, model2)
+        train_ds = util.augment_data(original_train_ds)
 
-        print(f'Epoch {epoch} loss: {validation_loss}')# (train loss: {tf.reduce_mean(train_loss)})')
+        gen_loss, disc_loss = train_gan(train_ds, gen, disc)
+        #validation_loss = validate_gan(val_ds, model)
 
-        # test model 2
-        test_accuracy = test_model(test_ds, model2)
-        print("accuracy:", test_accuracy)
+
+        print(f'Epoch {epoch} Generator loss: {gen_loss}, Discriminator loss: {disc_loss}')
+
+        # test model
+        #test_accuracy = test_model(test_ds, model)
+        #print("accuracy:", test_accuracy)
 
         train_losses.append(train_loss)
-        val_losses.append(validation_loss)
-        accuracy_values.append(test_accuracy)
+        #val_losses.append(validation_loss)
+        #accuracy_values.append(test_accuracy)
 
         # check for early stopping
-        if early_stop.check(validation_loss):
+        if early_stop.check(gen_loss):
             break
-    # test model 2
-    test_accuracy = test_model(test_ds, model2)
-    print("Overall model2 accuracy on test dataset:", test_accuracy)
-    #print(model.summary())
+        
+    # test model
+    #test_accuracy = test_model(test_ds, model)
+    #print("Overall model accuracy on test dataset:", test_accuracy)
 
-    util.graph_info('model' + str(datetime.datetime.now()).replace(' ', '-').replace(':','_'), train_losses, val_losses, accuracy_values)
+    #util.graph_info('model' + str(datetime.datetime.now()).replace(' ', '-').replace(':','_'), train_losses, val_losses, accuracy_values)
 
-optimizer = tf.keras.optimizers.Adam(learning_rate=0.000005)
 
-def train_model(train_ds, model) -> float:
-    loss_values = []
+
+
+def train_gan(train_ds, gen, disc):
+    gen_loss_values = []
+    disc_loss_values = []
+    
     for batch in tqdm(train_ds):
-        with tf.GradientTape() as tape:
+        noise = tf.random.normal([batch.shape[0], 100])
+
+        with tf.GradientTape() as gen_tape, tf.GradientTape() as disc_tape:
             # run network
-            loss = calc_batch_loss(batch, model)
-        loss_values.append(loss)
+            generated_images = gen(noise, training=True)
 
-        # gradient update
-        train_vars = model.trainable_variables
-        grads = tape.gradient(loss, train_vars)
-        optimizer.apply_gradients(zip(grads, train_vars))
+            real_output = disc(batch, training=True)
+            fake_output = disc(generated_images, training=True)
 
-    return tf.math.reduce_mean(loss_values).numpy()
+            gen_loss = gen.calc_loss(fake_output)
+            disc_loss = disc.calc_loss(real_output, fake_output)
+
+            gradients_of_generator = gen_tape.gradient(gen_loss, gen.trainable_variables)
+            gradients_of_discriminator = disc_tape.gradient(disc_loss, disc.trainable_variables)
+
+            gen.optimizer.apply_gradients(zip(gradients_of_generator, gen.trainable_variables))
+            disc.optimizer.apply_gradients(zip(gradients_of_discriminator, disc.trainable_variables))
+        
+        gen_loss_values.append(gen_loss)
+        disc_loss_values.append(disc_loss)
+
+    gen_loss = tf.math.reduce_mean(gen_loss_values).numpy()
+    disc_loss = tf.math.reduce_mean(disc_loss_values).numpy()
+
+    return gen_loss, disc_loss
 
 
-def validate_model(val_ds, model):
+def validate_gan(val_ds, gan, disc):
     loss = []
     for batch in val_ds:
         # calculate accuracy with validation set

@@ -3,10 +3,9 @@ import tensorflow_datasets as tfds # to load training data
 import numpy as np
 import matplotlib.pyplot as plt
 
-DATA_DIR = './tensorflow-datasets/'
+DATA_DIR = '$WORK/tensorflow-datasets/'
 batch_size = 32
 AUTOTUNE = tf.data.AUTOTUNE
-
 
 def prepare(ds, shuffle=False):
     if shuffle:
@@ -16,53 +15,43 @@ def prepare(ds, shuffle=False):
     ds = ds.batch(batch_size)
   
     # Use buffered prefetching on all datasets.
-    return ds#.prefetch(buffer_size=AUTOTUNE)
+    return ds.prefetch(buffer_size=AUTOTUNE)
   
 
+data_augmentation = tf.keras.Sequential([
+    tf.keras.layers.RandomFlip("horizontal_and_vertical")
+    #tf.keras.layers.RandomRotation(0.2),
+])
+
+def augment_data(ds):
+    # Use data augmentation only on the training set.
+    ds = ds.map(lambda x: (data_augmentation(x, training=True)),
+              num_parallel_calls=AUTOTUNE)
+
+    return ds.prefetch(buffer_size=AUTOTUNE)
+
+
+
 def load_data():
-    (train_ds, val_ds, test_ds) = tfds.load(
-        'imdb_reviews',
-        split=['train[:90%]', 'train[90%:]', 'test'],
-    )
 
-    global full_training_ds
-    full_training_ds = train_ds.map(lambda x: x['text'])
+    #full_ds = tf.keras.preprocessing.image_dataset_from_directory(
+                    #'/work/cse479/kthompson/cat_dataset/', image_size=(64,64), label_mode=None
+                #)
 
-    train_ds = prepare(train_ds, shuffle=True)
-    val_ds = prepare(val_ds)
-    test_ds = prepare(test_ds)
+    train_ds = tf.keras.preprocessing.image_dataset_from_directory(
+                    '/work/cse479/kthompson/cat_dataset/dataset-part2/', image_size=(64,64), label_mode=None
+                )
+
+    val_ds = tf.keras.preprocessing.image_dataset_from_directory(
+                    '/work/cse479/kthompson/cat_dataset/dataset-part1/', image_size=(64,64), label_mode=None
+                )
+
+    test_ds = tf.keras.preprocessing.image_dataset_from_directory(
+                    '/work/cse479/kthompson/cat_dataset/dataset-part3/', image_size=(64,64), label_mode=None
+                )
 
     return train_ds, val_ds, test_ds
 
-
-def create_vectorize_layer(train_text):
-    MAX_SEQ_LEN = 128
-    MAX_TOKENS = 5000
-
-    #ds = tfds.load('imdb_reviews', data_dir=DATA_DIR)
-
-
-    # Create TextVectorization layer
-    vectorize_layer = tf.keras.layers.TextVectorization(
-        max_tokens=MAX_TOKENS,
-        output_mode='int',
-        output_sequence_length=MAX_SEQ_LEN)
-
-    # Use `adapt` to create a vocabulary mapping words to integers
-    #train_text = ds['train'].map(lambda x: x['text'])
-    global full_training_ds
-    vectorize_layer.adapt(full_training_ds)
-
-    return vectorize_layer
-
-
-def create_embedding_layer(vectorize_layer):
-    VOCAB_SIZE = len(vectorize_layer.get_vocabulary())
-    EMBEDDING_SIZE = int(np.sqrt(VOCAB_SIZE))
-
-    embedding_layer = tf.keras.layers.Embedding(VOCAB_SIZE, EMBEDDING_SIZE)
-
-    return embedding_layer
 
 
 def convert_labels_to_onehot(labels, total_labels):

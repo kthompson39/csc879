@@ -2,189 +2,121 @@ from __future__ import print_function
 
 import numpy as np                 # to use numpy arrays
 import tensorflow as tf            # to specify and run computation graphs
+
+from tensorflow.keras import layers
+
 import tensorflow_datasets as tfds # to load training data
 import matplotlib.pyplot as plt    # to visualize data and draw plots
 from tqdm import tqdm              # to track progress of loops
 
 import util
 
-class Attention_Layer(tf.keras.layers.Layer):
+class Generator():
+    """
+    Inspired by https://www.tensorflow.org/tutorials/generative/dcgan
+    """
     def __init__(self):
-        super(Attention_Layer, self).__init__()
+        model = tf.keras.Sequential()
+        model.add(layers.Dense(8*8*512, use_bias=False, input_shape=(100,)))
+        model.add(layers.BatchNormalization())
+        model.add(layers.LeakyReLU())
 
-        self.attention = tf.keras.layers.Attention()
-        self.norm1 = tf.keras.layers.BatchNormalization()
-        self.norm2 = tf.keras.layers.BatchNormalization()
-        self.dense = tf.keras.layers.Dense(128)
-        self.add = tf.keras.layers.Add()
+        model.add(layers.Reshape((8, 8, 512)))
+        assert model.output_shape == (None, 8, 8, 512)  # Note: None is the batch size
 
-        #self.is_built = False
-        return
+        model.add(layers.Conv2DTranspose(256, (5, 5), strides=(1, 1), padding='same', use_bias=False))
+        assert model.output_shape == (None, 8, 8, 256)
+        model.add(layers.BatchNormalization())
+        model.add(layers.LeakyReLU())
 
-    #def build(self):
-        #self.dense = tf.keras.layers.dense(2)
-        #self.is_built = True
+        model.add(layers.Conv2DTranspose(128, (5, 5), strides=(2, 2), padding='same', use_bias=False))
+        assert model.output_shape == (None, 16, 16, 128)
+        model.add(layers.BatchNormalization())
+        model.add(layers.LeakyReLU())
 
+        model.add(layers.Conv2DTranspose(64, (5, 5), strides=(2, 2), padding='same', use_bias=False))
+        assert model.output_shape == (None, 32, 32, 64)
+        model.add(layers.BatchNormalization())
+        model.add(layers.LeakyReLU())
 
-    def call(self, x):
-        #if not self.is_built:
-            #self.build()
-        query, value = x
-        x = self.attention([query, value])
-        z = self.add([x,value])
-        z = self.norm1(x)
-        z_shape = z.shape.as_list()
-        x = tf.reshape(z, [-1,z_shape[1]])
-        v = self.dense(x)
-        v = tf.reshape(v, z_shape)
-        v = self.add([v,z])
-        v = self.norm2(v)
+        model.add(layers.Conv2DTranspose(3, (5, 5), strides=(2, 2), padding='same', use_bias=False, activation='tanh'))
+        assert model.output_shape == (None, 64, 64, 3)
 
-        return v
+        self.model = model
 
-
-class Model1():
-    def __init__(self, vectorize_layer, embedding_layer):
-        self.query_layer = tf.keras.layers.Conv1D(
-                    filters=100,
-                    kernel_size=4,
-                    padding='same')
-        self.value_layer = tf.keras.layers.Conv1D(
-                    filters=100,
-                    kernel_size=4,
-                    padding='same')
-
-        self.concat = tf.keras.layers.Concatenate()
-
-        self.att = [Attention_Layer() for i in range(5)]
-
-        #self.output_layer1 = tf.keras.layers.Dense(256)
-        #self.output_layer2 = tf.keras.layers.Dense(32)
-        self.output_layer3 = tf.keras.layers.Dense(2, activation=tf.nn.softmax)
-
-        self.embedding_layer = embedding_layer
-        self.vectorize_layer = vectorize_layer
+        self.cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=True)
+        self.optimizer = tf.keras.optimizers.Adam(learning_rate=0.0004)
 
         return
 
 
     #@tf.function
-    def __call__(self, text):
-        vec = self.vectorize_layer(text)
-        embeddings = self.embedding_layer(vec)
-        query = self.query_layer(embeddings)
-        value = self.value_layer(embeddings)
-
-        for cell in self.att:
-            value = cell([query, value])
-
-        attention_values = self.concat([query, value])
-        shape = attention_values.shape.as_list()
-        x = tf.reshape(attention_values, [shape[0], -1])
-        #y = self.output_layer1(x)
-        #z = self.output_layer2(y)
-        logits = self.output_layer3(x)
+    def __call__(self, image, training=False):
+        logits = self.model(image, training=training)
 
         return logits
 
-    def summary(self):
-        #self.conv_classifier.summary()
-        pass
-
-    @property
-    def layers(self):
-        return self.conv_classifier.layers
-
     @property
     def trainable_variables(self):
-        vals = self.concat.trainable_variables
-        vals += self.vectorize_layer.trainable_variables
-        vals += self.embedding_layer.trainable_variables
-        vals += self.query_layer.trainable_variables
-        vals += self.value_layer.trainable_variables
-        #vals += self.output_layer1.trainable_variables
-        #vals += self.output_layer2.trainable_variables
-        vals += self.output_layer3.trainable_variables
-        for cell in self.att:
-            vals += cell.trainable_variables
+        vals = self.model.trainable_variables
         return vals
 
-    def calc_loss(self, logits, labels):
-        # convert labels to one-hot vectors
-        labels = util.convert_labels_to_onehot(labels, 2) 
+    def calc_loss(self, fake_output):
+        return self.cross_entropy(tf.ones_like(fake_output), fake_output)
 
-        return util.batch_cross_entropy(labels, logits)
+    def optimizer(self):
+        return self.optimizer
 
 
-class Model2():
-    def __init__(self, vectorize_layer, embedding_layer):
-        self.query_layer = tf.keras.layers.Conv1D(
-                    filters=100,
-                    kernel_size=4,
-                    padding='same')
-        self.value_layer = tf.keras.layers.Conv1D(
-                    filters=100,
-                    kernel_size=4,
-                    padding='same')
-        self.lstm = tf.keras.layers.LSTM(64, return_sequences=True, activation = tf.nn.tanh, kernel_initializer = 'random_normal'  )
 
-        self.attention = tf.keras.layers.Attention()
-        self.concat = tf.keras.layers.Concatenate()
+class Discriminator():
+    """
+    Inspired by https://www.tensorflow.org/tutorials/generative/dcgan
+    """
+    def __init__(self):
+        model = tf.keras.Sequential()
+        model.add(layers.Conv2D(64, (5, 5), strides=(2, 2), padding='same',
+                                         input_shape=[64, 64, 3]))
+        model.add(layers.LeakyReLU())
+        model.add(layers.Dropout(0.3))
 
-        self.lstm2 = tf.keras.layers.LSTM(32, activation = tf.nn.relu, kernel_initializer = 'random_normal'  )
+        model.add(layers.Conv2D(128, (5, 5), strides=(2, 2), padding='same'))
+        model.add(layers.LeakyReLU())
+        model.add(layers.Dropout(0.3))
 
-        self.output_layer = tf.keras.layers.Dense(2, activation=tf.nn.softmax)
+        model.add(layers.Conv2D(256, (5, 5), strides=(2, 2), padding='same'))
+        model.add(layers.LeakyReLU())
+        model.add(layers.Dropout(0.3))
 
-        self.embedding_layer = embedding_layer
-        self.vectorize_layer = vectorize_layer
+        model.add(layers.Flatten())
+        model.add(layers.Dense(1))
+
+        self.model = model
+
+        self.cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=True)
+        self.optimizer = tf.keras.optimizers.Adam(learning_rate=0.0004)
 
         return
 
-
-    #@tf.function
-    def __call__(self, text):
-        vec = self.vectorize_layer(text)
-        embeddings = self.embedding_layer(vec)
-        query = self.query_layer(embeddings)
-        value = self.value_layer(embeddings)
-
-        value = self.attention([query, value])
-
-        attention_values = self.concat([query, value])
-    
-        x = self.lstm(attention_values)
-        x = self.lstm2(x)
-        #shape = attention_values.shape.as_list()
-        #x = tf.reshape(attention_values, [shape[0], -1])
-
-        logits = self.output_layer(x)
+    def __call__(self, image, training=False):
+        logits = self.model(image, training=training)
 
         return logits
 
-    def summary(self):
-        #self.conv_classifier.summary()
-        pass
-
-    @property
-    def layers(self):
-        return self.conv_classifier.layers
 
     @property
     def trainable_variables(self):
-        vals = self.concat.trainable_variables
-        vals += self.vectorize_layer.trainable_variables
-        vals += self.embedding_layer.trainable_variables
-        vals += self.query_layer.trainable_variables
-        vals += self.value_layer.trainable_variables
-        vals += self.output_layer.trainable_variables
-        vals += self.lstm.trainable_variables
-        vals += self.lstm2.trainable_variables
-        vals += self.attention.trainable_variables
+        vals = self.model.trainable_variables
         return vals
 
-    def calc_loss(self, logits, labels):
-        # convert labels to one-hot vectors
-        labels = util.convert_labels_to_onehot(labels, 2) 
 
-        return util.batch_cross_entropy(labels, logits)
+    def calc_loss(self, real_output, fake_output):
+        real_loss = self.cross_entropy(tf.ones_like(real_output), real_output)
+        fake_loss = self.cross_entropy(tf.zeros_like(fake_output), fake_output)
+        total_loss = real_loss + fake_loss
+        return total_loss
+
+    def optimizer(self):
+        return self.optimizer
+
 
