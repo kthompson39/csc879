@@ -80,32 +80,50 @@ def batch_cross_entropy(labels, logits):
 
     return total
 
-def graph_info(fig_name, train_loss, validation_loss, accuracy):
+def graph_info(fig_name, gen_loss, disc_loss):
     fig, ax = plt.subplots()
-    accuracy = np.array(accuracy) * 100
 
-    x = np.arange(1,len(train_loss)+1)
+    x = np.arange(1,len(gen_loss)+1)
 
-    ax.set_title("Cross Entropy Loss While Training")
+    ax.set_title("Loss While Training")
     ax.set_xlabel("Epochs")
-    #ax.set_xticks(x)
-    ax.set_ylabel("Cross Entropy Loss")
+    ax.set_ylabel("Generator Loss")
 
-    lns1 =ax.plot(x, validation_loss,     'r-', linewidth=1.2, label='Validation set Loss')
-    lns2 =ax.plot(x, train_loss,   'b-', linewidth=1.2, label='Training set Loss')
+    lns1 =ax.plot(x, gen_loss,     'r-', linewidth=1.2, label='Generator Loss')
 
     ax2 = ax.twinx()
-    lns3 = ax2.plot(x, accuracy,'g-', linewidth=1.0, label='Testing set Accuracy')
+    lns3 = ax2.plot(x, disc_loss,'g-', linewidth=1.0, label='Discriminator Loss')
 
     ax2.tick_params(axis ='y', labelcolor = 'g')
-    ax2.set_ylabel("Accuracy (%)", color = 'g')
-    ax2.set(ylim=(0, 100))
+    ax2.set_ylabel("Discriminator Loss", color = 'g')
 
-    lns = lns1+lns2+lns3
+    lns = lns1+lns3
     labs = [l.get_label() for l in lns]
     ax.legend(lns, labs, loc=0)
 
     plt.savefig(fig_name + '.png', format='png')
+
+
+def generate_and_save_images(model, epoch, test_input):
+    # Notice atraining` is set to False.
+    # This is so all layers run in inference mode (batchnorm).
+    predictions = model(test_input, training=False)
+
+    fig = plt.figure(figsize=(4, 4))
+
+    for i in range(predictions.shape[0]):
+        plt.subplot(4, 4, i+1)
+
+        #cast all channels to integer [0...255]
+        img = predictions[i]*127.5 + 127.5
+        img = tf.cast(img, dtype=tf.int32)
+
+        plt.imshow(img, interpolation='nearest')
+        plt.axis('off')
+
+    plt.savefig('image_at_epoch_{:04d}.png'.format(epoch))
+    plt.show()
+
 
 
 

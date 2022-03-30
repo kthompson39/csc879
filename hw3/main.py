@@ -23,16 +23,16 @@ def main():
 
     early_stop = util.EarlyStopping(5)
     
-    train_losses = []
-    val_losses = []
-    accuracy_values = []
+    gen_losses = []
+    disc_losses = []
+    input_noise = tf.random.normal([16, 100])
+
     # train model completely
-    for epoch in range(100):
+    for epoch in range(10):
         train_ds = util.augment_data(original_train_ds)
 
         gen_loss, disc_loss = train_gan(train_ds, gen, disc)
         #validation_loss = validate_gan(val_ds, model)
-
 
         print(f'Epoch {epoch} Generator loss: {gen_loss}, Discriminator loss: {disc_loss}')
 
@@ -40,9 +40,11 @@ def main():
         #test_accuracy = test_model(test_ds, model)
         #print("accuracy:", test_accuracy)
 
-        train_losses.append(train_loss)
-        #val_losses.append(validation_loss)
-        #accuracy_values.append(test_accuracy)
+        gen_losses.append(gen_loss)
+        disc_losses.append(disc_loss)
+
+
+        util.generate_and_save_images(gen, epoch, input_noise)
 
         # check for early stopping
         if early_stop.check(gen_loss):
@@ -52,7 +54,9 @@ def main():
     #test_accuracy = test_model(test_ds, model)
     #print("Overall model accuracy on test dataset:", test_accuracy)
 
-    #util.graph_info('model' + str(datetime.datetime.now()).replace(' ', '-').replace(':','_'), train_losses, val_losses, accuracy_values)
+    file_name = 'model' + str(datetime.datetime.now()).replace(' ', '-').replace(':','_')
+
+    util.graph_info(file_name, gen_losses, disc_losses)
 
 
 
