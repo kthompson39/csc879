@@ -23,7 +23,6 @@ def main():
 
     # visualize model
     # util.model_visual(gen,disc)
-    
 
     early_stop = util.EarlyStopping(5)
     
@@ -32,7 +31,7 @@ def main():
     input_noise = tf.random.normal([16, 100])
 
     # train model completely
-    for epoch in range(1):
+    for epoch in range(10):
         train_ds = util.augment_data(original_train_ds)
 
         gen_loss, disc_loss = train_gan(train_ds, gen, disc)
