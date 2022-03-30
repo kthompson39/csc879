@@ -2,6 +2,7 @@ import tensorflow as tf            # to specify and run computation graphs
 import tensorflow_datasets as tfds # to load training data
 import numpy as np
 import matplotlib.pyplot as plt
+import visualkeras
 
 DATA_DIR = '$WORK/tensorflow-datasets/'
 batch_size = 32
@@ -124,8 +125,9 @@ def generate_and_save_images(model, epoch, test_input):
     plt.savefig('image_at_epoch_{:04d}.png'.format(epoch))
     plt.show()
 
-
-
+def model_visual(gen,disc):
+   visualkeras.layered_view(gen.model, to_file='genModel.png') 
+   visualkeras.layered_view(disc.model, to_file='discModel.png') 
 
 class EarlyStopping:
     """
