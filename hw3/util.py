@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import visualkeras
 from PIL import ImageFont
+import scipy
 
 DATA_DIR = '$WORK/tensorflow-datasets/'
 batch_size = 32
@@ -21,7 +22,7 @@ def prepare(ds, shuffle=False):
   
 
 data_augmentation = tf.keras.Sequential([
-    tf.keras.layers.RandomFlip("horizontal_and_vertical")
+    tf.keras.layers.RandomFlip("vertical")
     #tf.keras.layers.RandomRotation(0.2),
 ])
 
@@ -32,6 +33,99 @@ def augment_data(ds):
 
     return ds.prefetch(buffer_size=AUTOTUNE)
 
+def normalize_dataset(ds):
+    return ds.map(lambda x: (normalize_images(x)), num_parallel_calls=AUTOTUNE)
+    
+
+def normalize_images(images):
+    #normailze RGB channels to be [-1,1]
+    norm_img = (images - 127.5) / 127.5
+    return norm_img
+
+
+inception_model = tf.keras.applications.inception_v3.InceptionV3(include_top=False,
+                              #weights="imagenet",
+                              pooling='avg',
+                              input_shape=(75,75,3))
+
+# assumes images have any shape and pixels in [0,255]
+def calculate_inception_score(images, eps=1E-16):
+    # load inception v3 model
+    model = tf.keras.applications.inception_v3.InceptionV3()
+    
+    #subset = tf.keras.applications.inception_v3.preprocess_input(img)
+    subset = images
+
+    # scale images to the required size
+    subset = tf.image.resize(subset, [299,299], method='nearest')
+    # predict p(y|x)
+    p_yx = model.predict(subset)
+    # calculate p(y)
+    p_y = expand_dims(p_yx.mean(axis=0), 0)
+    # calculate KL divergence using log probabilities
+    kl_d = p_yx * (log(p_yx + eps) - log(p_y + eps))
+    # sum over classes
+    sum_kl_d = kl_d.sum(axis=1)
+    # average over images
+    avg_kl_d = mean(sum_kl_d)
+    # undo the log
+    is_score = exp(avg_kl_d)
+
+    # average across images
+    #is_avg, is_std = mean(scores), std(scores)
+    return is_score
+
+
+# Running mean and std
+class Welford():
+    def __init__(self,a_list=None):
+        self.n = 0
+        self.M = 0
+        self.S = 0
+
+    def update(self, x):
+        self.n += 1
+
+        newM = self.M + (x - self.M) / self.n
+        newS = self.S + (x - self.M) * (x - newM)
+
+        self.M = newM
+        self.S = newS
+
+    @property
+    def mean(self):
+        return self.M
+
+    @property
+    def std(self):
+        if self.n == 1:
+            return 0
+        return math.sqrt(self.S / (self.n - 1))
+
+
+
+def calc_fid(real_images, generated_images):
+    images1 = tf.image.resize(real_images, [75,75], method='nearest')
+    images2 = tf.image.resize(generated_images, [75,75], method='nearest')
+    #breakpoint()
+
+    # calculate activations
+    act1 = inception_model.predict(images1)
+    act2 = inception_model.predict(images2)
+
+    # calculate mean and covariance statistics
+    mu1, sigma1 = act1.mean(axis=0), np.cov(act1, rowvar=False)
+    mu2, sigma2 = act2.mean(axis=0), np.cov(act2, rowvar=False)
+    # calculate sum squared difference between means
+    ssdiff = np.sum((mu1 - mu2)**2.0)
+    # calculate sqrt of product between cov
+    covmean = scipy.linalg.sqrtm(sigma1.dot(sigma2))
+    # check and correct imaginary numbers from sqrt
+    if np.iscomplexobj(covmean):
+        covmean = covmean.real
+    # calculate score
+    fid = ssdiff + np.trace(sigma1 + sigma2 - 2.0 * covmean)
+    return fid
 
 
 def load_data():
@@ -44,43 +138,27 @@ def load_data():
                     '/work/cse479/kthompson/cat_dataset/dataset-part2/', image_size=(64,64), label_mode=None
                 )
 
+    # val_ds broken?
     val_ds = tf.keras.preprocessing.image_dataset_from_directory(
                     '/work/cse479/kthompson/cat_dataset/dataset-part1/', image_size=(64,64), label_mode=None
                 )
 
     test_ds = tf.keras.preprocessing.image_dataset_from_directory(
-                    '/work/cse479/kthompson/cat_dataset/dataset-part3/', image_size=(64,64), label_mode=None
+                    '/work/cse479/kthompson/cat_dataset/dataset-part3/', image_size=(64,64), label_mode=None, validation_split=0.5, subset="training", seed=1
+                )
+    test_2_ds = tf.keras.preprocessing.image_dataset_from_directory(
+                    '/work/cse479/kthompson/cat_dataset/dataset-part3/', image_size=(64,64), label_mode=None, validation_split=0.5, subset="validation", seed=1
                 )
 
-    return train_ds, val_ds, test_ds
+    #train_ds = normalize_dataset(train_ds)
+    #val_ds = normalize_dataset(train_ds)
+    #test_ds = normalize_dataset(train_ds)
+
+    train_ds = train_ds.concatenate(test_2_ds)
+
+    return train_ds, test_ds
 
 
-
-def convert_labels_to_onehot(labels, total_labels):
-    """
-    given a list of expected labels, convert to list of list of one
-    hot vectors.
-    ex:
-        labels = [0,2]; total_labels = 3
-        returns [[1,0,0],[0,0,1]]
-    """
-    one_hots = []
-    for label in labels:
-        temp = np.zeros((total_labels,))
-        temp[label] = 1.
-        one_hots.append(temp)
-                                                                                    
-    return one_hots
-
-def batch_cross_entropy(labels, logits):
-    total = 0
-    bce = tf.keras.losses.BinaryCrossentropy(from_logits=True)
-
-    # batch size
-    for batch in range(len(logits)):
-        total += bce(labels[batch], logits[batch])
-
-    return total
 
 def graph_info(fig_name, gen_loss, disc_loss):
     fig, ax = plt.subplots()
@@ -123,7 +201,7 @@ def generate_and_save_images(model, epoch, test_input):
         plt.imshow(img, interpolation='nearest')
         plt.axis('off')
 
-    plt.savefig('image_at_epoch_{:04d}.png'.format(epoch))
+    plt.savefig('image4_at_epoch_{:04d}.png'.format(epoch))
     plt.show()
 
 def model_visual(gen,disc):
