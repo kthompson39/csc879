@@ -22,7 +22,7 @@ def prepare(ds, shuffle=False):
   
 
 data_augmentation = tf.keras.Sequential([
-    tf.keras.layers.RandomFlip("vertical")
+    tf.keras.layers.RandomFlip("horizontal")
     #tf.keras.layers.RandomRotation(0.2),
 ])
 
@@ -48,66 +48,9 @@ inception_model = tf.keras.applications.inception_v3.InceptionV3(include_top=Fal
                               pooling='avg',
                               input_shape=(75,75,3))
 
-# assumes images have any shape and pixels in [0,255]
-def calculate_inception_score(images, eps=1E-16):
-    # load inception v3 model
-    model = tf.keras.applications.inception_v3.InceptionV3()
-    
-    #subset = tf.keras.applications.inception_v3.preprocess_input(img)
-    subset = images
-
-    # scale images to the required size
-    subset = tf.image.resize(subset, [299,299], method='nearest')
-    # predict p(y|x)
-    p_yx = model.predict(subset)
-    # calculate p(y)
-    p_y = expand_dims(p_yx.mean(axis=0), 0)
-    # calculate KL divergence using log probabilities
-    kl_d = p_yx * (log(p_yx + eps) - log(p_y + eps))
-    # sum over classes
-    sum_kl_d = kl_d.sum(axis=1)
-    # average over images
-    avg_kl_d = mean(sum_kl_d)
-    # undo the log
-    is_score = exp(avg_kl_d)
-
-    # average across images
-    #is_avg, is_std = mean(scores), std(scores)
-    return is_score
-
-
-# Running mean and std
-class Welford():
-    def __init__(self,a_list=None):
-        self.n = 0
-        self.M = 0
-        self.S = 0
-
-    def update(self, x):
-        self.n += 1
-
-        newM = self.M + (x - self.M) / self.n
-        newS = self.S + (x - self.M) * (x - newM)
-
-        self.M = newM
-        self.S = newS
-
-    @property
-    def mean(self):
-        return self.M
-
-    @property
-    def std(self):
-        if self.n == 1:
-            return 0
-        return math.sqrt(self.S / (self.n - 1))
-
-
-
 def calc_fid(real_images, generated_images):
     images1 = tf.image.resize(real_images, [75,75], method='nearest')
     images2 = tf.image.resize(generated_images, [75,75], method='nearest')
-    #breakpoint()
 
     # calculate activations
     act1 = inception_model.predict(images1)
@@ -183,6 +126,21 @@ def graph_info(fig_name, gen_loss, disc_loss):
 
     plt.savefig(fig_name + '.png', format='png')
 
+def graph_fid(fig_name, fid_loss):
+    fig, ax = plt.subplots()
+
+    x = np.arange(1,len(fid_loss)+1)
+
+    ax.set_title("FID Loss While Training")
+    ax.set_xlabel("Epochs")
+    ax.set_ylabel("FID Loss")
+
+    ax.plot(x, fid_loss,     'r-', linewidth=1.2, label='FID Loss')
+
+    ax.legend(loc=0)
+
+    plt.savefig(fig_name + '.png', format='png')
+
 
 def generate_and_save_images(model, epoch, test_input):
     # Notice atraining` is set to False.
@@ -201,8 +159,26 @@ def generate_and_save_images(model, epoch, test_input):
         plt.imshow(img, interpolation='nearest')
         plt.axis('off')
 
-    plt.savefig('image4_at_epoch_{:04d}.png'.format(epoch))
+    plt.savefig('image7_at_epoch_{:04d}.png'.format(epoch))
     plt.show()
+
+
+
+
+
+def graph_images(images):
+    for i in range(images.shape[0]):
+        plt.subplot(4, 4, i+1)
+
+        img = tf.cast(images[i], dtype=tf.int32)
+        plt.imshow(img, interpolation='nearest')
+        plt.axis('off')
+
+    plt.savefig('example_input_cats.png')
+    plt.show()
+
+
+
 
 def model_visual(gen,disc):
     # font = ImageFont.truetype("arial.ttf", 32)

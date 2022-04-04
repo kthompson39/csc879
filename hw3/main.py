@@ -28,13 +28,14 @@ def main():
     
     gen_losses = []
     disc_losses = []
+    fid_losses = []
     input_noise = tf.random.normal([16, 100])
 
     # train model completely
     for epoch in range(100):
         train_ds = util.augment_data(original_train_ds)
 
-        training_gen_loss, training_disc_loss, training_fid_loss = run_gan(train_ds, gen, disc, training=True)
+        training_gen_loss, training_disc_loss, _ = run_gan(train_ds, gen, disc, training=True)
 
         val_gen_loss, val_disc_loss, val_fid_loss = run_gan(test_ds, gen, disc, training=False)
 
@@ -46,7 +47,7 @@ def main():
 
         gen_losses.append(val_gen_loss)
         disc_losses.append(val_disc_loss)
-
+        fid_losses.append(val_fid_loss)
 
         util.generate_and_save_images(gen, epoch, input_noise)
 
@@ -62,6 +63,7 @@ def main():
     file_name = 'model' + str(datetime.datetime.now()).replace(' ', '-').replace(':','_')
 
     util.graph_info(file_name, gen_losses, disc_losses)
+    util.graph_fid(file_name + "_fid", fid_losses)
 
 
 
@@ -71,6 +73,7 @@ def run_gan(ds, gen, disc, training=False):
     fid_loss_values = []
     images = []
     
+    i = 1
     for batch in tqdm(ds):
         batch = util.normalize_images(batch)
         noise = tf.random.normal([batch.shape[0], 100])
@@ -93,12 +96,15 @@ def run_gan(ds, gen, disc, training=False):
                 gen.optimizer.apply_gradients(zip(gradients_of_generator, gen.trainable_variables))
                 disc.optimizer.apply_gradients(zip(gradients_of_discriminator, disc.trainable_variables))
         
-        fid_loss = util.calc_fid(batch , generated_images)
+        if (not training) and i == len(ds):
+            fid_loss = util.calc_fid(batch , generated_images)
+            fid_loss_values.append(fid_loss)
+
+        i+=1
 
         gen_loss_values.append(gen_loss)
         disc_loss_values.append(disc_loss)
-        fid_loss_values.append(fid_loss)
-
+        
 
     gen_loss = tf.math.reduce_mean(gen_loss_values).numpy()
     disc_loss = tf.math.reduce_mean(disc_loss_values).numpy()
